@@ -1,4 +1,5 @@
 module MyNFT::RealNFT {
+    friend MyNFT::Marketplace;
 
     use std::string;
     use std::signer;
@@ -80,6 +81,66 @@ module MyNFT::RealNFT {
         };
 
         abort 102; // NFT not found
+    }
+
+    public fun has_nft(owner: address, nft_id: u64): bool acquires NFTStore {
+        if (!exists<NFTStore>(owner)) {
+            return false;
+        };
+
+        let store = borrow_global<NFTStore>(owner);
+        let i = 0;
+        let len = vector::length(&store.nfts);
+
+        while (i < len) {
+            let nft_ref = vector::borrow(&store.nfts, i);
+
+            if (nft_ref.id == nft_id && nft_ref.owner == owner) {
+                return true;
+            };
+
+            i = i + 1;
+        };
+
+        false
+    }
+
+    public(friend) fun marketplace_transfer(
+        buyer: &signer,
+        seller_addr: address,
+        nft_id: u64
+    ) acquires NFTStore {
+        assert!(exists<NFTStore>(seller_addr), 103);
+
+        let seller_store = borrow_global_mut<NFTStore>(seller_addr);
+        let i = 0;
+        let len = vector::length(&seller_store.nfts);
+        let buyer_addr = signer::address_of(buyer);
+
+        while (i < len) {
+            let nft_ref = vector::borrow(&seller_store.nfts, i);
+
+            if (nft_ref.id == nft_id && nft_ref.owner == seller_addr) {
+                let nft = vector::swap_remove(&mut seller_store.nfts, i);
+
+                if (!exists<NFTStore>(buyer_addr)) {
+                    move_to(buyer, NFTStore {
+                        counter: 0,
+                        nfts: vector::empty<NFT>()
+                    });
+                };
+
+                nft.owner = buyer_addr;
+
+                let buyer_store = borrow_global_mut<NFTStore>(buyer_addr);
+                vector::push_back(&mut buyer_store.nfts, nft);
+                return;
+            };
+
+            i = i + 1;
+        };
+
+        abort 104; // NFT not found in seller store
     }
 
     /// ✅ VIEW: number of NFTs

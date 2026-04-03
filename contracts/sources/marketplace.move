@@ -1,7 +1,10 @@
 module MyNFT::Marketplace {
 
+    use aptos_framework::aptos_coin::AptosCoin;
+    use aptos_framework::coin;
     use std::signer;
     use std::vector;
+    use MyNFT::RealNFT;
 
     struct Listing has key, store, drop {
         nft_id: u64,
@@ -24,12 +27,28 @@ module MyNFT::Marketplace {
         nft_id: u64,
         price: u64
     ) acquires MarketplaceStore {
+        let seller_addr = signer::address_of(seller);
+        assert!(RealNFT::has_nft(seller_addr, nft_id), 100);
 
-        let store = borrow_global_mut<MarketplaceStore>(signer::address_of(seller));
+        if (!exists<MarketplaceStore>(seller_addr)) {
+            move_to(seller, MarketplaceStore {
+                listings: vector::empty<Listing>()
+            });
+        };
+
+        let store = borrow_global_mut<MarketplaceStore>(seller_addr);
+        let i = 0;
+        let len = vector::length(&store.listings);
+
+        while (i < len) {
+            let listing = vector::borrow(&store.listings, i);
+            assert!(listing.nft_id != nft_id, 101);
+            i = i + 1;
+        };
 
         let listing = Listing {
             nft_id,
-            seller: signer::address_of(seller),
+            seller: seller_addr,
             price
         };
 
@@ -37,10 +56,11 @@ module MyNFT::Marketplace {
     }
 
     public entry fun buy_nft(
-        _buyer: &signer,
+        buyer: &signer,
         seller_addr: address,
         nft_id: u64
     ) acquires MarketplaceStore {
+        assert!(exists<MarketplaceStore>(seller_addr), 102);
 
         let store = borrow_global_mut<MarketplaceStore>(seller_addr);
 
@@ -51,14 +71,16 @@ module MyNFT::Marketplace {
             let listing = vector::borrow(&store.listings, i);
 
             if (listing.nft_id == nft_id) {
-                vector::swap_remove(&mut store.listings, i);
+                let purchased_listing = vector::swap_remove(&mut store.listings, i);
+                coin::transfer<AptosCoin>(buyer, seller_addr, purchased_listing.price);
+                RealNFT::marketplace_transfer(buyer, seller_addr, purchased_listing.nft_id);
                 return;
             };
 
             i = i + 1;
         };
 
-        abort 1;
+        abort 103;
     }
 
     public entry fun cancel_listing(
