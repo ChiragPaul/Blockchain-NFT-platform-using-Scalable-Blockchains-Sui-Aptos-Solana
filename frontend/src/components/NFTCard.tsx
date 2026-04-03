@@ -8,6 +8,10 @@ type NFTCardProps = {
   image?: string
   status?: string
   isOwner?: boolean
+  isListed?: boolean
+  actionLabel?: string
+  actionDisabled?: boolean
+  onAction?: () => void
 }
 
 export default function NFTCard({
@@ -18,8 +22,13 @@ export default function NFTCard({
   image,
   status,
   isOwner = false,
+  isListed = false,
+  actionLabel,
+  actionDisabled = false,
+  onAction,
 }: NFTCardProps) {
   const imageUrl = image ? ipfsToHttp(image) : ""
+  const primaryLabel = actionLabel ?? (isOwner ? (isListed ? "Cancel Listing" : "List for Sale") : "View Only")
 
   return (
     <div className="overflow-hidden rounded-[28px] border border-white/8 bg-white/[0.04] shadow-[0_30px_80px_rgba(0,0,0,0.35)] transition duration-300 hover:-translate-y-1 hover:border-cyan-400/30">
@@ -60,13 +69,19 @@ export default function NFTCard({
         <div className="flex items-end justify-between gap-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.28em] text-zinc-500">
-              {isOwner ? "Floor" : "Price"}
+              {isListed ? "Listed Price" : isOwner ? "Floor" : "Price"}
             </p>
-            <p className="mt-1 text-2xl font-semibold text-fuchsia-300">{price} APT</p>
+            <p className="mt-1 text-2xl font-semibold text-fuchsia-300">
+              {price === "--" ? "--" : `${price} APT`}
+            </p>
           </div>
 
-          <button className="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-white transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/10">
-            {isOwner ? "List for Sale" : "Buy Now"}
+          <button
+            onClick={onAction}
+            disabled={actionDisabled || !onAction}
+            className="rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-white transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {primaryLabel}
           </button>
         </div>
       </div>
