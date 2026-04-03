@@ -1,0 +1,13 @@
+.DS_Store
+.env
+.env.*
+
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+contracts/.aptos/
+contracts/build/
+
+backend/node_modules/
+frontend_backup/

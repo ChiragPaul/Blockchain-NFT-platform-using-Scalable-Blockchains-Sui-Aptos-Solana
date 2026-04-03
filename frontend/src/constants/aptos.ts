@@ -1,0 +1,2 @@
+export const REAL_NFT_MODULE_ADDRESS =
+  "0xb61ff39ec3c625ff169d3de1859cb74a05238ff18bb6ee4a19cd10375a9dfda8"
