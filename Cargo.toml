@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "programs/*"               # Include all programs in programs/ folder
+]
+resolver = "2"                 # Use Cargo resolver v2
+
+[profile.release]
+overflow-checks = true         # Panic on integer overflow (safety)
+lto = "fat"                    # Full link-time optimization
+codegen-units = 1              # Single codegen unit for max optimization
+
+[profile.release.build-override]
+opt-level = 3                  # Maximum optimization level
+incremental = false            # No incremental builds in release
+codegen-units = 1              # Consistent with above
