@@ -1,0 +1,23 @@
+{
+  "name": "Cosmic Voyager #001",
+  "description": "An exclusive NFT verifying participation in the early testing phase of the Sui Loyalty Marketplace Platform. Grants maximum tier benefits natively.",
+  "image_url": "ipfs://bafybeig...example/image.png",
+  "attributes": [
+    {
+      "trait_type": "Tier",
+      "value": "Diamond"
+    },
+    {
+      "trait_type": "Generation",
+      "value": "Alpha"
+    },
+    {
+      "trait_type": "Loyalty Points Booster",
+      "value": "+20%"
+    }
+  ],
+  "properties": {
+    "creator": "Sui Platform Admin",
+    "issued_at": "2026-03-24T23:00:00Z"
+  }
+}
