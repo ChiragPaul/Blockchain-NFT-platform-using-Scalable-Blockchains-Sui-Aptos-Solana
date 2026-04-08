@@ -1,440 +1,366 @@
-import { useEffect, useState } from 'react';
-import { useCurrentAccount, useSignAndExecuteTransaction, useSuiClientQuery } from '@mysten/dapp-kit';
-import { Transaction } from '@mysten/sui/transactions';
+import { useEffect, useState } from "react"
+import NFTCard from "./NFTCard"
+import { useWallet } from "@aptos-labs/wallet-adapter-react"
+import type { InputTransactionData } from "@aptos-labs/wallet-adapter-core"
+import {
+  type MarketplaceNFT,
+  aptos,
+  fetchMarketplaceNFTs,
+} from "../utils/aptosClient"
+import {
+  APTOS_NETWORK_NAME,
+  MARKETPLACE_BUY_FUNCTION,
+  MARKETPLACE_CANCEL_FUNCTION,
+  MARKETPLACE_INIT_FUNCTION,
+  MARKETPLACE_STORE,
+  MARKETPLACE_LIST_FUNCTION,
+} from "../constants/aptos"
 
-const PACKAGE_ID = import.meta.env.VITE_PACKAGE_ID || '0x_PACKAGE_ID';
-const MARKETPLACE_ID = import.meta.env.VITE_MARKETPLACE_ID || '0x_MARKETPLACE_ID';
-// Usually you would fetch the user's loyalty object ID automatically via querying their owned objects, 
-// for prototyping we simulate it via env or manual input
-const LOYALTY_ID = import.meta.env.VITE_LOYALTY_ID || '0x_LOYALTY_ID';
-const PLACEHOLDER_MARKETPLACE_ID = '0x_MARKETPLACE_ID';
+export default function Marketplace() {
+  const [activeTab, setActiveTab] = useState("all")
+  const {
+    account,
+    connected,
+    network,
+    signAndSubmitTransaction,
+    wallet,
+  } = useWallet()
+  const [nfts, setNfts] = useState<MarketplaceNFT[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [activeNftId, setActiveNftId] = useState<string | null>(null)
 
-type ListingCard = {
-  listingId: string;
-  nftId: string;
-  priceMist: string;
-  seller: string;
-};
+  const loadNfts = async () => {
+    setLoading(true)
+    setError(null)
 
-type OwnedNftCard = {
-  objectId: string;
-  name: string;
-  description: string;
-  url: string;
-  owner: string;
-};
-
-function formatSui(mist: string) {
-  return (Number(mist) / 1_000_000_000).toLocaleString(undefined, {
-    maximumFractionDigits: 4,
-  });
-}
-
-function shortenAddress(value: string) {
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
-function parseErrorMessage(error: unknown) {
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object') {
-    const maybeMessage = (error as { message?: string }).message;
-    if (maybeMessage) return maybeMessage;
-
-    const nestedMessage = (error as { cause?: { message?: string } }).cause?.message;
-    if (nestedMessage) return nestedMessage;
+    try {
+      const data = await fetchMarketplaceNFTs(account?.address.toString())
+      setNfts(data)
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to fetch NFTs from Devnet"
+      )
+    } finally {
+      setLoading(false)
+    }
   }
 
-  return 'Unknown transaction error';
-}
-
-type MarketplaceProps = {
-  recentMintedNftId?: string | null;
-  onRecentMintHandled?: () => void;
-};
-
-export default function Marketplace({ recentMintedNftId, onRecentMintHandled }: MarketplaceProps) {
-  const currentAccount = useCurrentAccount();
-  const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
-
-  const [nftIdToBuy, setNftIdToBuy] = useState('');
-  const [priceToBuy, setPriceToBuy] = useState('');
-  const [buying, setBuying] = useState(false);
-
-  const [nftIdToList, setNftIdToList] = useState('');
-  const [priceToList, setPriceToList] = useState('');
-  const [listing, setListing] = useState(false);
-
   useEffect(() => {
-    if (!recentMintedNftId) return;
-    setNftIdToList(recentMintedNftId);
-    if (!priceToList) {
-      setPriceToList('0.01');
-    }
-    onRecentMintHandled?.();
-  }, [onRecentMintHandled, priceToList, recentMintedNftId]);
+    let ignore = false
 
-  const hasMarketplaceId = !!MARKETPLACE_ID && MARKETPLACE_ID !== PLACEHOLDER_MARKETPLACE_ID;
+    const load = async () => {
+      try {
+        setLoading(true)
+        setError(null)
 
-  const {
-    data: ownedNftsResponse,
-    isPending: ownedNftsPending,
-    refetch: refetchOwnedNfts,
-  } = useSuiClientQuery(
-    'getOwnedObjects',
-    {
-      owner: currentAccount?.address ?? '',
-      filter: {
-        StructType: `${PACKAGE_ID}::nft::NFT`,
-      },
-      options: { showContent: true },
-    },
-    {
-      enabled: !!currentAccount?.address,
-    },
-  );
+        const data = await fetchMarketplaceNFTs(account?.address.toString())
 
-  const {
-    data: dynamicFields,
-    isPending: listingsPending,
-    error: listingsError,
-    refetch: refetchDynamicFields,
-  } = useSuiClientQuery(
-    'getDynamicFields',
-    { parentId: MARKETPLACE_ID },
-    { enabled: hasMarketplaceId },
-  );
-
-  const listingObjectIds =
-    dynamicFields?.data
-      ?.map((field: any) => field.objectId)
-      .filter((id: string | undefined): id is string => Boolean(id)) ?? [];
-
-  const {
-    data: listingObjects,
-    isPending: listingObjectsPending,
-    refetch: refetchListingObjects,
-  } = useSuiClientQuery(
-    'multiGetObjects',
-    {
-      ids: listingObjectIds,
-      options: { showContent: true },
-    },
-    {
-      enabled: listingObjectIds.length > 0,
-    },
-  );
-
-  const visibleListings: ListingCard[] =
-    listingObjects
-      ?.map((item: any) => {
-        const fields = item?.data?.content?.fields;
-        if (!fields?.nft_id || fields?.price == null || !fields?.seller) return null;
-
-        return {
-          listingId: item?.data?.objectId ?? '',
-          nftId: String(fields.nft_id),
-          priceMist: String(fields.price),
-          seller: String(fields.seller),
-        };
-      })
-      .filter((item: ListingCard | null): item is ListingCard => Boolean(item)) ?? [];
-
-  const ownedNfts: OwnedNftCard[] =
-    ownedNftsResponse?.data
-      ?.map((item: any) => {
-        const fields = item?.data?.content?.fields;
-        const objectId = item?.data?.objectId;
-        if (!fields || !objectId) return null;
-
-        return {
-          objectId,
-          name: String(fields.name ?? 'Untitled NFT'),
-          description: String(fields.description ?? ''),
-          url: String(fields.url ?? ''),
-          owner: String(fields.owner ?? ''),
-        };
-      })
-      .filter((item: OwnedNftCard | null): item is OwnedNftCard => Boolean(item)) ?? [];
-
-  const refreshListings = () => {
-    refetchDynamicFields();
-    if (listingObjectIds.length > 0) {
-      refetchListingObjects();
-    }
-    if (currentAccount?.address) {
-      refetchOwnedNfts();
-    }
-  };
-
-  const handleBuy = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentAccount) return;
-    setBuying(true);
-    
-    try {
-      const tx = new Transaction();
-      // Price in MIST
-      const priceInMist = BigInt(parseFloat(priceToBuy) * 1_000_000_000);
-      const [payment] = tx.splitCoins(tx.gas, [tx.pure.u64(priceInMist)]);
-      
-      tx.moveCall({
-        target: `${PACKAGE_ID}::marketplace::buy_nft`,
-        arguments: [
-          tx.object(MARKETPLACE_ID),
-          tx.pure.id(nftIdToBuy),
-          payment,
-          tx.object(LOYALTY_ID),
-        ],
-      });
-
-      signAndExecuteTransaction(
-        { transaction: tx },
-        {
-          onSuccess: () => {
-            alert('Purchase successful!');
-            setNftIdToBuy('');
-            setPriceToBuy('');
-            refreshListings();
-          },
-          onError: (err) => {
-            console.error(err);
-            alert(`Purchase failed: ${parseErrorMessage(err)}`);
-          },
-          onSettled: () => setBuying(false)
+        if (!ignore) {
+          setNfts(data)
         }
-      );
-    } catch(err) {
-      console.error(err);
-      setBuying(false);
-    }
-  };
-
-  const handleList = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentAccount) return;
-    setListing(true);
-
-    try {
-      const tx = new Transaction();
-      // Price in MIST
-      const priceInMist = BigInt(parseFloat(priceToList) * 1_000_000_000);
-      
-      tx.moveCall({
-        target: `${PACKAGE_ID}::marketplace::list_nft`,
-        arguments: [
-          tx.object(MARKETPLACE_ID),
-          tx.object(nftIdToList),
-          tx.pure.u64(priceInMist),
-        ],
-      });
-
-      signAndExecuteTransaction(
-        { transaction: tx },
-        {
-          onSuccess: () => {
-            alert('Listing successful!');
-            setNftIdToList('');
-            setPriceToList('');
-            refreshListings();
-          },
-          onError: (err) => {
-            console.error(err);
-            alert(`Listing failed: ${parseErrorMessage(err)}`);
-          },
-          onSettled: () => setListing(false)
+      } catch (err) {
+        if (!ignore) {
+          setError(
+            err instanceof Error ? err.message : "Failed to fetch NFTs from Devnet"
+          )
         }
-      );
-    } catch(err) {
-      console.error(err);
-      setListing(false);
+      } finally {
+        if (!ignore) {
+          setLoading(false)
+        }
+      }
     }
-  };
+
+    void load()
+
+    return () => {
+      ignore = true
+    }
+  }, [account?.address])
+
+  const filteredItems = nfts.filter((item) => {
+    if (activeTab === "collection") return item.isOwner
+    if (activeTab === "recent") return item.isListed
+    return true
+  })
+
+  const ensureDevnet = () => {
+    const walletNetwork = network?.name?.toLowerCase?.() ?? ""
+    if (walletNetwork && walletNetwork !== APTOS_NETWORK_NAME) {
+      throw new Error(
+        `Wallet is connected to ${network?.name}. Switch to ${APTOS_NETWORK_NAME} and try again.`
+      )
+    }
+  }
+
+  const ensureMarketplaceStore = async (address: string) => {
+    try {
+      await aptos.getAccountResource({
+        accountAddress: address,
+        resourceType: MARKETPLACE_STORE,
+      })
+    } catch {
+      const initPayload: InputTransactionData = {
+        data: {
+          function: MARKETPLACE_INIT_FUNCTION,
+          typeArguments: [],
+          functionArguments: [],
+        },
+      }
+
+      const initTx = await signAndSubmitTransaction(initPayload)
+      await aptos.waitForTransaction({ transactionHash: initTx.hash })
+    }
+  }
+
+  const handleListOrCancel = async (nft: MarketplaceNFT) => {
+    try {
+      if (!connected || !account?.address) {
+        throw new Error("Connect wallet first.")
+      }
+
+      ensureDevnet()
+      setActionError(null)
+      setActiveNftId(nft.id)
+
+      const walletAddress = account.address.toString().toLowerCase()
+      if (walletAddress !== nft.owner.toLowerCase()) {
+        throw new Error("Only the NFT owner can manage listings.")
+      }
+
+      if (nft.isListed) {
+        const shouldCancel = window.confirm(
+          `Cancel listing for ${nft.title} ${nft.tokenId}?`
+        )
+
+        if (!shouldCancel) {
+          return
+        }
+
+        const cancelPayload: InputTransactionData = {
+          data: {
+            function: MARKETPLACE_CANCEL_FUNCTION,
+            typeArguments: [],
+            functionArguments: [nft.numericTokenId],
+          },
+        }
+
+        const tx = await signAndSubmitTransaction(cancelPayload)
+        await aptos.waitForTransaction({ transactionHash: tx.hash })
+        await loadNfts()
+        return
+      }
+
+      const priceInput = window.prompt(
+        `Set listing price in APT for ${nft.title} ${nft.tokenId}`,
+        "1"
+      )
+
+      if (!priceInput) {
+        return
+      }
+
+      const normalized = priceInput.trim()
+      if (!/^\d+$/.test(normalized)) {
+        throw new Error("Listing price must be a whole number in APT for the current contract.")
+      }
+
+      await ensureMarketplaceStore(account.address.toString())
+
+      const listPayload: InputTransactionData = {
+        data: {
+          function: MARKETPLACE_LIST_FUNCTION,
+          typeArguments: [],
+          functionArguments: [nft.numericTokenId, Number(normalized)],
+        },
+      }
+
+      console.log("LIST DEBUG:", {
+        wallet: wallet?.name ?? "unknown",
+        owner: account.address.toString(),
+        network: network?.name ?? "unknown",
+        nftId: nft.numericTokenId,
+        price: normalized,
+        function: MARKETPLACE_LIST_FUNCTION,
+      })
+
+      const tx = await signAndSubmitTransaction(listPayload)
+      await aptos.waitForTransaction({ transactionHash: tx.hash })
+      await loadNfts()
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Marketplace action failed"
+      )
+    } finally {
+      setActiveNftId(null)
+    }
+  }
+
+  const handleBuy = async (nft: MarketplaceNFT) => {
+    try {
+      if (!connected || !account?.address) {
+        throw new Error("Connect wallet first.")
+      }
+
+      ensureDevnet()
+      setActionError(null)
+      setActiveNftId(nft.id)
+
+      if (!nft.isListed || !nft.seller) {
+        throw new Error("This NFT is not listed for sale.")
+      }
+
+      if (account.address.toString().toLowerCase() === nft.owner.toLowerCase()) {
+        throw new Error("You already own this NFT.")
+      }
+
+      const shouldBuy = window.confirm(
+        `Buy ${nft.title} ${nft.tokenId} for ${nft.price} APT?`
+      )
+
+      if (!shouldBuy) {
+        return
+      }
+
+      const buyPayload: InputTransactionData = {
+        data: {
+          function: MARKETPLACE_BUY_FUNCTION,
+          typeArguments: [],
+          functionArguments: [nft.seller, nft.numericTokenId],
+        },
+      }
+
+      console.log("BUY DEBUG:", {
+        wallet: wallet?.name ?? "unknown",
+        buyer: account.address.toString(),
+        network: network?.name ?? "unknown",
+        nftId: nft.numericTokenId,
+        seller: nft.seller,
+        price: nft.price,
+        function: MARKETPLACE_BUY_FUNCTION,
+      })
+
+      const tx = await signAndSubmitTransaction(buyPayload)
+      await aptos.waitForTransaction({ transactionHash: tx.hash })
+      await loadNfts()
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Buy transaction failed"
+      )
+    } finally {
+      setActiveNftId(null)
+    }
+  }
 
   return (
-    <div className="marketplace-container" style={{animation: 'fadeIn 0.5s'}}>
-      <h2 style={{borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem'}}>Marketplace</h2>
-      
-      <div className="grid-container" style={{marginTop: '2rem'}}>
-        {/* Buy Section */}
-        <div className="nft-card" style={{padding: '1.5rem', background: 'rgba(255,255,255,0.05)'}}>
-          <h3 style={{color: 'var(--secondary)'}}>Buy NFT</h3>
-          <p className="subtitle" style={{color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem'}}>
-            Purchase an NFT and earn loyalty points (1 point per SUI).
+    <div className="mt-10">
+      <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-[0.34em] text-cyan-300">
+            Curated Marketplace
           </p>
-          <form onSubmit={handleBuy}>
-            <div className="input-group">
-              <label>Target NFT Object ID</label>
-              <input type="text" className="form-input" required value={nftIdToBuy} onChange={e=>setNftIdToBuy(e.target.value)} placeholder="0x..." />
-            </div>
-            <div className="input-group">
-              <label>Purchase Price (SUI)</label>
-              <input type="number" step="0.001" className="form-input" required value={priceToBuy} onChange={e=>setPriceToBuy(e.target.value)} placeholder="0.00" />
-            </div>
-            <button type="submit" className="primary-btn" disabled={buying}>{buying ? 'Confirming...' : 'Buy Now'}</button>
-          </form>
+          <h2 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
+            The Curator&apos;s Selection
+          </h2>
         </div>
 
-        {/* List Section */}
-        <div className="nft-card" style={{padding: '1.5rem', background: 'rgba(255,255,255,0.05)'}}>
-          <h3 style={{color: 'var(--primary)'}}>List NFT</h3>
-          <p className="subtitle" style={{color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem'}}>
-            Sell an NFT you own on the decentralized marketplace.
-          </p>
-          {recentMintedNftId && (
-            <div style={{marginBottom: '1rem', padding: '0.9rem 1rem', borderRadius: '12px', background: 'rgba(34, 211, 238, 0.12)', border: '1px solid rgba(34, 211, 238, 0.25)'}}>
-              <p style={{margin: 0, fontWeight: 700, color: 'var(--secondary)'}}>Freshly Minted NFT Ready</p>
-              <p style={{margin: '0.35rem 0 0', color: 'var(--text-muted)', wordBreak: 'break-all'}}>
-                {recentMintedNftId}
-              </p>
-            </div>
-          )}
-          <form onSubmit={handleList}>
-            <div className="input-group">
-              <label>Your NFT Object ID</label>
-              <input type="text" className="form-input" required value={nftIdToList} onChange={e=>setNftIdToList(e.target.value)} placeholder="0x..." />
-            </div>
-            <div className="input-group">
-              <label>Listing Price (SUI)</label>
-              <input type="number" step="0.001" className="form-input" required value={priceToList} onChange={e=>setPriceToList(e.target.value)} placeholder="0.00" />
-            </div>
-            <button type="submit" className="primary-btn" disabled={listing} style={{backgroundImage: 'linear-gradient(135deg, var(--secondary), var(--primary))'}}>
-              {listing ? 'Listing...' : 'List on Market'}
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <div className="nft-card" style={{padding: '1.5rem', marginTop: '2rem', background: 'rgba(255,255,255,0.04)'}}>
-        <h3 style={{color: 'var(--primary)', marginBottom: '0.35rem'}}>Your NFTs</h3>
-        <p className="subtitle" style={{color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 0}}>
-          NFTs currently owned by the connected wallet. Use one click to prefill the listing form.
-        </p>
-
-        {ownedNftsPending ? (
-          <p style={{marginTop: '1.5rem', color: 'var(--text-muted)'}}>Loading your NFTs...</p>
-        ) : ownedNfts.length === 0 ? (
-          <p style={{marginTop: '1.5rem', color: 'var(--text-muted)'}}>
-            No owned NFTs found for this wallet. Mint one first, or switch back to the wallet that owns the NFT.
-          </p>
-        ) : (
-          <div className="grid-container" style={{marginTop: '1.5rem'}}>
-            {ownedNfts.map((item) => (
-              <div key={item.objectId} className="nft-card" style={{padding: '1.25rem', background: 'rgba(0,0,0,0.18)'}}>
-                <div style={{display: 'flex', gap: '1rem', alignItems: 'flex-start'}}>
-                  {item.url ? (
-                    <img
-                      src={item.url}
-                      alt={item.name}
-                      style={{width: '88px', height: '88px', borderRadius: '12px', objectFit: 'cover', flexShrink: 0}}
-                    />
-                  ) : (
-                    <div style={{width: '88px', height: '88px', borderRadius: '12px', background: 'rgba(255,255,255,0.06)', flexShrink: 0}} />
-                  )}
-                  <div style={{minWidth: 0}}>
-                    <p style={{margin: 0, fontWeight: 700}}>{item.name}</p>
-                    <p style={{margin: '0.35rem 0 0', color: 'var(--text-muted)', fontSize: '0.9rem', wordBreak: 'break-all'}}>
-                      {item.objectId}
-                    </p>
-                    {item.description && (
-                      <p style={{margin: '0.6rem 0 0', color: 'var(--text-muted)', fontSize: '0.88rem'}}>
-                        {item.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="primary-btn"
-                  style={{marginTop: '1.25rem'}}
-                  onClick={() => {
-                    setNftIdToList(item.objectId);
-                    if (!priceToList) {
-                      setPriceToList('0.01');
-                    }
-                  }}
-                >
-                  List This NFT
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="nft-card" style={{padding: '1.5rem', marginTop: '2rem', background: 'rgba(255,255,255,0.04)'}}>
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap'}}>
-          <div>
-            <h3 style={{color: 'var(--secondary)', marginBottom: '0.35rem'}}>View Listed NFTs</h3>
-            <p className="subtitle" style={{color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 0}}>
-              Live listings loaded from the shared marketplace object on Sui.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="primary-btn"
-            onClick={refreshListings}
-            disabled={!hasMarketplaceId || listingsPending || listingObjectsPending}
-            style={{maxWidth: '220px'}}
-          >
-            {listingsPending || listingObjectsPending ? 'Refreshing...' : 'Refresh Listings'}
+        <div className="flex w-full max-w-xl items-center gap-3 rounded-full border border-white/8 bg-white/[0.04] px-4 py-3">
+          <span className="text-zinc-500">Search</span>
+          <input
+            placeholder="Filter by collection, title, or creator..."
+            className="w-full bg-transparent text-sm text-zinc-200 outline-none placeholder:text-zinc-600"
+          />
+          <button className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs uppercase tracking-[0.2em] text-zinc-300">
+            Sort
           </button>
         </div>
-
-        {!hasMarketplaceId ? (
-          <p style={{marginTop: '1.5rem', color: '#ff8e8e'}}>
-            Configure `VITE_MARKETPLACE_ID` to load marketplace listings.
-          </p>
-        ) : listingsError ? (
-          <p style={{marginTop: '1.5rem', color: '#ff8e8e'}}>
-            Could not load listings. Verify the marketplace object ID is correct.
-          </p>
-        ) : listingsPending || listingObjectsPending ? (
-          <p style={{marginTop: '1.5rem', color: 'var(--text-muted)'}}>Loading current listings from testnet...</p>
-        ) : visibleListings.length === 0 ? (
-          <p style={{marginTop: '1.5rem', color: 'var(--text-muted)'}}>
-            No active listings found yet. List an NFT above to see it appear here.
-          </p>
-        ) : (
-          <div className="grid-container" style={{marginTop: '1.5rem'}}>
-            {visibleListings.map((item) => (
-              <div key={item.listingId} className="nft-card" style={{padding: '1.25rem', background: 'rgba(0,0,0,0.18)'}}>
-                <div style={{display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start'}}>
-                  <div>
-                    <p style={{margin: 0, color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
-                      NFT
-                    </p>
-                    <p style={{margin: '0.35rem 0 0', fontWeight: 700, wordBreak: 'break-all'}}>{item.nftId}</p>
-                  </div>
-                  <div style={{textAlign: 'right'}}>
-                    <p style={{margin: 0, color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
-                      Price
-                    </p>
-                    <p style={{margin: '0.35rem 0 0', color: 'var(--secondary)', fontWeight: 700, fontSize: '1.1rem'}}>
-                      {formatSui(item.priceMist)} SUI
-                    </p>
-                  </div>
-                </div>
-
-                <p style={{margin: '1rem 0 0.25rem', color: 'var(--text-muted)', fontSize: '0.82rem'}}>Seller</p>
-                <p style={{margin: 0, fontWeight: 600}}>{shortenAddress(item.seller)}</p>
-
-                <button
-                  type="button"
-                  className="primary-btn"
-                  style={{marginTop: '1.25rem'}}
-                  onClick={() => {
-                    setNftIdToBuy(item.nftId);
-                    setPriceToBuy(formatSui(item.priceMist));
-                  }}
-                >
-                  Use for Buy Form
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+      <div className="mb-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex gap-3">
+          {["all", "collection", "recent"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`rounded-full px-4 py-2 text-sm capitalize transition ${
+                activeTab === tab
+                  ? "bg-gradient-to-r from-fuchsia-300 to-violet-500 text-black"
+                  : "bg-white/5 text-gray-400 hover:text-white"
+              }`}
+            >
+              {tab === "all"
+                ? "All Items"
+                : tab === "collection"
+                ? "My Collection"
+                : "Recently Listed"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {actionError ? (
+        <div className="mb-6 rounded-[24px] border border-amber-400/20 bg-amber-400/5 p-5 text-sm text-amber-100">
+          {actionError}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-[380px] animate-pulse rounded-[28px] border border-white/8 bg-white/[0.03]"
+            />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="rounded-[28px] border border-rose-400/20 bg-rose-400/5 p-6 text-sm text-rose-200">
+          {error}
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="rounded-[28px] border border-white/8 bg-white/[0.03] p-8 text-zinc-300">
+          No on-chain NFTs found yet for the tracked Devnet accounts.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {filteredItems.map((nft) => (
+            <NFTCard
+              key={nft.id}
+              tokenId={nft.tokenId}
+              title={nft.title}
+              owner={nft.owner}
+              price={nft.price}
+              image={nft.image}
+              status={nft.status}
+              isOwner={nft.isOwner}
+              isListed={nft.isListed}
+              actionLabel={
+                activeNftId === nft.id
+                  ? "Processing"
+                  : nft.isOwner
+                  ? nft.isListed
+                    ? "Cancel Listing"
+                    : "List for Sale"
+                  : nft.isListed
+                    ? "Buy Now"
+                    : "View Only"
+              }
+              actionDisabled={
+                activeNftId === nft.id || (!nft.isOwner && !nft.isListed)
+              }
+              onAction={
+                nft.isOwner
+                  ? () => void handleListOrCancel(nft)
+                  : nft.isListed
+                    ? () => void handleBuy(nft)
+                    : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
     </div>
-  );
+  )
 }
