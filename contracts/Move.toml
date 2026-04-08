@@ -1,0 +1,11 @@
+[package]
+name = "MyNFT"
+version = "1.0.0"
+
+[addresses]
+MyNFT = "0xb61ff39ec3c625ff169d3de1859cb74a05238ff18bb6ee4a19cd10375a9dfda8"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-framework.git"
+rev = "devnet"
+subdir = "aptos-framework"
